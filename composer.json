@@ -1,0 +1,41 @@
+{
+    "name": "silverstripe/tx-translator",
+    "description": "Silverstripe TX Translator",
+    "authors": [
+        {
+            "name": "SilverStripe",
+            "homepage": "http://silverstripe.com"
+        },
+        {
+            "name": "The SilverStripe Community",
+            "homepage": "http://silverstripe.org"
+        }
+    ],
+    "require": {
+        "php": "^7.4 || ^8.1",
+        "symfony/console": "^4 || ^5 || ^6",
+        "symfony/process": "^4 || ^5 || ^6",
+        "symfony/yaml": "^4 || ^5 || ^6",
+        "symfony/dotenv": "^5 || ^6",
+        "guzzlehttp/guzzle": "^6 || ^7"
+    },
+    "conflict": {
+        "silverstripe/framework": "<4.12.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5",
+        "squizlabs/php_codesniffer": "^3.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "SilverStripe\\TxTranslator\\": "src/",
+            "SilverStripe\\TxTranslator\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "lint": "phpcs src/ tests/php/",
+        "lint-clean": "phpcbf src/ tests/php/"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
