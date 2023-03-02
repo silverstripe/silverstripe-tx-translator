@@ -143,6 +143,19 @@ class Translator
                 if (!file_exists("$modulePath/.tx/config")) {
                     continue;
                 }
+                // See if the current "branch" is actually a tag that's been checked out,
+                // rather than a minor or next minor branch.
+                // If so, try to git checkout the what the minor branch for the tag should be.
+                // Read all branches rather than just using `git rev-parse --abbrev-ref HEAD` so that
+                // tags aren't just reported as "HEAD", instead they are "(HEAD detached at 3.0.2)"
+                $branches = $this->exec('git branch', $modulePath);
+                // the current branch will be prefixed with a *, extract what the branch is with a regex
+                preg_match("#(^|\n)\* (.+?)(\n|$)#", $branches, $matches);
+                $branch = $matches[2] ?? 'invalid';
+                $cleanBranch = $this->getCleanBranch($branch);
+                if ($cleanBranch !== $branch) {
+                    $this->exec("git checkout $cleanBranch", $modulePath);
+                }
                 $branch = $this->exec('git rev-parse --abbrev-ref HEAD', $modulePath);
                 if (!is_numeric($branch)) {
                     throw new RuntimeException("Branch $branch in $modulePath is not a minor or next-minor branch");
@@ -150,6 +163,17 @@ class Translator
                 $this->modulePaths[] = $modulePath;
             }
         }
+    }
+
+    /**
+     * A tag will show up as "(HEAD detached at 3.0.2)" - return this as 3.0
+     */
+    private function getCleanBranch(string $branch): string
+    {
+        if (preg_match('#^\(HEAD detached at ([0-9]+\.[0-9]+)\.[0-9]+#', $branch, $matches)) {
+            return $matches[1];
+        }
+        return $branch;
     }
 
     /**
@@ -213,6 +237,7 @@ class Translator
     private function transifexPullSource()
     {
         foreach ($this->modulePaths as $modulePath) {
+            $this->log("Pulling translations for $modulePath");
             // ensure .tx/config is up to date
             $contents = file_get_contents("$modulePath/.tx/config");
             if (strpos($contents, '[o:') === false) {
@@ -374,7 +399,7 @@ class Translator
                     'Not pushing changes or creating pull-request because TX_DEV_MODE is enabled.',
                     'A new branch was created.'
                 ]));
-                return;
+                continue;
             }
 
             // Push changes to creative-commoners
@@ -429,6 +454,8 @@ class Translator
     {
         $this->log("Running $command");
         $process = Process::fromShellCommandline($command, $cwd);
+        // set a timeout of 5 minutes - tx pull operations may take a long time
+        $process->setTimeout(300);
         $process->run();
         if (!$process->isSuccessful()) {
             throw new ProcessFailedException($process);

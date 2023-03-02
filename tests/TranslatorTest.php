@@ -12,9 +12,49 @@ class TranslatorTest extends TestCase
     private const INVALID = 'INVALID';
 
     /**
+     * @dataProvider provideGetCleanBranch
+     */
+    public function testGetCleanBranch(string $branch, string $expected)
+    {
+        $actual = $this->invokeMethod('getCleanBranch', $branch);
+        $this->assertSame($expected, $actual);
+    }
+
+    public function provideGetCleanBranch()
+    {
+        return [
+            [
+                '5',
+                '5'
+            ],
+            [
+                '5.0',
+                '5.0'
+            ],
+            [
+                'invalid',
+                'invalid'
+            ],
+            [
+                '(HEAD detached at 1.2.3)',
+                '1.2'
+            ],
+            [
+                '(HEAD detached at 4.5.6-beta1)',
+                '4.5'
+            ],
+            [
+                // This is how it looks when a commit is checked out
+                '(HEAD detached at 2238396)',
+                '(HEAD detached at 2238396)'
+            ]
+        ];
+    }
+
+    /**
      * @dataProvider provideJsonEncode
-     * */
-    public function testJsonEncode(mixed $data, string $expected): void
+     */
+    public function testJsonEncode($data, string $expected): void
     {
         if ($expected === self::INVALID) {
             $this->expectException(LogicException::class);
@@ -59,7 +99,7 @@ class TranslatorTest extends TestCase
     /**
      * @dataProvider provideJsonDecode
      */
-    public function testJsonDecode(string $jsonString, mixed $expected): void
+    public function testJsonDecode(string $jsonString, $expected): void
     {
         if ($expected === self::INVALID) {
             $this->expectException(LogicException::class);
@@ -140,7 +180,7 @@ class TranslatorTest extends TestCase
         ];
     }
 
-    private function invokeMethod(string $methodName, mixed ...$args): mixed
+    private function invokeMethod(string $methodName, ...$args)
     {
         $translator = new Translator();
         $method = new ReflectionMethod($translator, $methodName);
