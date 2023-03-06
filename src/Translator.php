@@ -12,6 +12,10 @@ use Symfony\Component\Console\Formatter\OutputFormatter;
 
 class Translator
 {
+    private array $excluded = [
+        'colymba/gridfield-bulk-editing-tools',
+    ];
+
     /**
      * Min % difference required for tx updates
      */
@@ -141,6 +145,16 @@ class Translator
                     continue;
                 }
                 if (!file_exists("$modulePath/.tx/config")) {
+                    continue;
+                }
+                $include = true;
+                foreach ($this->excluded as $excluded) {
+                    if (strpos($modulePath, $excluded) !== false) {
+                        $include = false;
+                        break;
+                    }
+                }
+                if (!$include) {
                     continue;
                 }
                 // See if the current "branch" is actually a tag that's been checked out,
@@ -341,6 +355,7 @@ class Translator
             return;
         }
         foreach ($this->modulePaths as $modulePath) {
+            $this->log("Pushing $modulePath sources to transifex");
             $this->exec('tx push -s', $modulePath);
         }
     }
