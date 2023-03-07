@@ -405,6 +405,11 @@ class Translator
             // Push changes to creative-commoners
             $this->exec("git push --set-upstream tx-ccs $branch", $modulePath);
 
+            // Ensure secondary-rate limit is not exceeded
+            $seconds = 10;
+            $this->log("Sleeping $seconds seconds so that secondary rate-limit is not exceeded");
+            sleep($seconds);
+
             // Create pull-request via github api
             // https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request
             $body = implode(' ', [
@@ -441,7 +446,7 @@ class Translator
     {
         $this->log('<info>The following pull-requests were created:</info>');
         foreach ($this->pullRequestUrls as $pullRequestUrl) {
-            $this->log($pullRequestUrl);
+            $this->log("- $pullRequestUrl");
         }
     }
 
