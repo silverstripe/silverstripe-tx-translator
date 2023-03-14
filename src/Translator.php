@@ -119,10 +119,20 @@ class Translator
         return array_diff(scanDir($dir), ['.', '..']);
     }
 
+    private function getFrameworkMajor(): string
+    {
+        $output = $this->exec('composer show silverstripe/framework | grep versions');
+        if (!preg_match('#^versions : \* ([4-9])#', $output, $matches)) {
+            throw new LogicException('Could not work out major version of framework');
+        }
+        return $matches[1];
+    }
+
     private function setModulePaths(): void
     {
         $client = new Client();
-        $url = 'https://raw.githubusercontent.com/silverstripe/supported-modules/gh-pages/modules.json';
+        $cmsMajor = $this->getFrameworkMajor();
+        $url = "https://raw.githubusercontent.com/silverstripe/supported-modules/$cmsMajor/modules.json";
         $body = (string) $client->request('GET', $url)->getBody();
         $supportedVendors = [];
         $supportedModules = [];
