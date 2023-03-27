@@ -316,7 +316,7 @@ class Translator
             if (is_array($val)) {
                 $this->recursiveRecordBlankStrings($parentKey . '-' . $key, $val);
             }
-            if ($this->isBlankString($val)) {
+            if (is_string($val) && $this->isEmpty($val)) {
                 $this->blankEnStrings[$parentKey . '-' . $key] = true;
             }
         }
@@ -328,15 +328,15 @@ class Translator
             if (is_array($val)) {
                 $this->recursiveRemoveBlankStrings($parentKey . '-' . $key, $val);
             }
-            if ($this->isBlankString($val) && !array_key_exists($parentKey . '-' . $key, $this->blankEnStrings)) {
+            if ($this->isEmpty($val) && !array_key_exists($parentKey . '-' . $key, $this->blankEnStrings)) {
                 unset($data[$key]);
             }
         }
     }
 
-    private function isBlankString(string $str)
+    private function isEmpty($val)
     {
-        return empty($str) && $str !== '0';
+        return empty($val) && $val !== '0';
     }
 
     /**
