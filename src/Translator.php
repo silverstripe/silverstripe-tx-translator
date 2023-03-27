@@ -272,17 +272,71 @@ class Translator
     private function mergeYaml(): void
     {
         $this->log('Merging local yaml files');
+        // $this->originalYaml at this point is yaml prior to adding in transifex yaml
         foreach ($this->originalYaml as $path => $contentYaml) {
             // If there are any keys in the original yaml that are missing now, add them back in.
             if (file_exists($path)) {
                 $rawYaml = file_get_contents($path);
+                // $parsedYaml at this point is transifex yaml
                 $parsedYaml = Yaml::parse($rawYaml);
+                $this->removeBlankStrings($parsedYaml);
+                // transifex yaml has precedence over original yaml
                 $contentYaml = $this->arrayMergeRecursive($contentYaml, $parsedYaml);
             }
             // Write back to local
             file_put_contents($path, Yaml::dump($contentYaml));
         }
         $this->log('Finished merging ' . count($this->originalYaml) . ' yaml files');
+    }
+
+    private $blankEnStrings;
+
+    private function removeBlankStrings(array &$sourceData)
+    {
+        $this->blankEnStrings = [];
+        foreach ($sourceData as $lang => &$data) {
+            if ($lang !== 'en') {
+                continue;
+            }
+            $this->recursiveRecordBlankStrings('', $data);
+        }
+        foreach ($sourceData as $lang => &$data) {
+            if ($lang === 'en') {
+                continue;
+            }
+            if (is_array($data)) {
+                $this->recursiveRemoveBlankStrings('', $data);
+            }
+        }
+    }
+
+    private function recursiveRecordBlankStrings(string $parentKey, array &$data)
+    {
+        foreach ($data as $key => &$val) {
+            if (is_array($val)) {
+                $this->recursiveRecordBlankStrings($parentKey . '-' . $key, $val);
+            }
+            if ($this->isBlankString($val)) {
+                $this->blankEnStrings[$parentKey . '-' . $key] = true;
+            }
+        }
+    }
+
+    private function recursiveRemoveBlankStrings(string $parentKey, array &$data)
+    {
+        foreach ($data as $key => &$val) {
+            if (is_array($val)) {
+                $this->recursiveRemoveBlankStrings($parentKey . '-' . $key, $val);
+            }
+            if ($this->isBlankString($val) && !array_key_exists($parentKey . '-' . $key, $this->blankEnStrings)) {
+                unset($data[$key]);
+            }
+        }
+    }
+
+    private function isBlankString(string $str)
+    {
+        return empty($str) && $str !== '0';
     }
 
     /**
@@ -297,6 +351,7 @@ class Translator
             foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $sourceFile) {
                 $dirty = file_get_contents($sourceFile);
                 $sourceData = Yaml::parse($dirty);
+                $this->removeBlankStrings($sourceData);
                 $cleaned = Yaml::dump($sourceData, 9999, 2);
                 if ($dirty !== $cleaned) {
                     $num++;
