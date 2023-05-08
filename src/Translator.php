@@ -69,7 +69,9 @@ class Translator
     private function checkEnv(): void
     {
         $txInstructions = 'Install the new go version of the client https://developers.transifex.com/docs/cli';
-        if ($this->exec('which tx') === '') {
+        try {
+            $this->exec('which tx');
+        } catch (ProcessFailedException $e) {
             throw new RuntimeException("Could not find tx executable. $txInstructions");
         }
         $help = $this->exec('tx help');
@@ -78,7 +80,9 @@ class Translator
         if (($matches[1] ?? 0) < 1.6) {
             throw new RuntimeException("Your version of tx is too old. $txInstructions");
         }
-        if ($this->exec('which wget') === '') {
+        try {
+            $this->exec('which wget');
+        } catch (ProcessFailedException $e) {
             throw new RuntimeException('Could not find wget command. Please install it.');
         }
         $this->txSite = getenv('TX_SITE');
@@ -88,7 +92,7 @@ class Translator
         if (strpos($this->txSite, 'http://') !== 0 && strpos($this->txSite, 'https://') !== 0) {
             $this->txSite = 'http://' . $this->txSite;
         }
-        if (!filter_var($this->txSite, FILTER_VALIDATE_URL)) {
+        if (!parse_url($this->txSite, PHP_URL_HOST)) {
             throw new RuntimeException('SITE environment variable is not a valid url');
         }
         $this->githubToken = getenv('TX_GITHUB_API_TOKEN');
@@ -392,7 +396,7 @@ class Translator
         }
         $module = urlencode(implode(',', $modulesNames));
         $site = rtrim($this->txSite, '/');
-        $this->exec("wget $site/dev/tasks/i18nTextCollectorTask?flush=all&merge=1&module=$module");
+        $this->exec("wget --content-on-error $site/dev/tasks/i18nTextCollectorTask?flush=all&merge=1&module=$module");
     }
 
     /**
