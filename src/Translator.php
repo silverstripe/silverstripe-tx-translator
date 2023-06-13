@@ -24,6 +24,8 @@ class Translator
 
     private bool $doTransifexPush = false;
 
+    private bool $doCollectStrings = false;
+
     private bool $isDevMode = false;
 
     private string $txSite = '';
@@ -56,7 +58,11 @@ class Translator
             $this->mergeYaml();
             $this->cleanYaml();
             $this->mergeJson();
+        }
+        if ($this->doCollectStrings) {
             $this->collectStrings();
+        }
+        if ($this->doTransifexPullAndUpdate) {
             $this->generateJavascript();
         }
         if ($this->doTransifexPush) {
@@ -85,16 +91,6 @@ class Translator
         } catch (ProcessFailedException $e) {
             throw new RuntimeException('Could not find wget command. Please install it.');
         }
-        $this->txSite = getenv('TX_SITE');
-        if (!$this->txSite) {
-            throw new RuntimeException('TX_SITE environment variable is not defined');
-        }
-        if (strpos($this->txSite, 'http://') !== 0 && strpos($this->txSite, 'https://') !== 0) {
-            $this->txSite = 'http://' . $this->txSite;
-        }
-        if (!parse_url($this->txSite, PHP_URL_HOST)) {
-            throw new RuntimeException('SITE environment variable is not a valid url');
-        }
         $this->githubToken = getenv('TX_GITHUB_API_TOKEN');
         if (!$this->githubToken) {
             $message = implode(' ', [
@@ -109,6 +105,20 @@ class Translator
         $this->doTransifexPush = in_array(strtolower(getenv('TX_PUSH')), ['on', 'true', '1']);
         if (!$this->doTransifexPullAndUpdate && !$this->doTransifexPush) {
             throw new RuntimeException('Either TX_PULL or TX_PUSH must be set to true');
+        }
+        // This will be set to false by default if TX_COLLECT environment variable is not defined
+        $this->doCollectStrings = in_array(strtolower(getenv('TX_COLLECT')), ['on', 'true', '1']);
+        if ($this->doCollectStrings) {
+            $this->txSite = getenv('TX_SITE');
+            if (!$this->txSite) {
+                throw new RuntimeException('TX_SITE environment variable is not defined');
+            }
+            if (strpos($this->txSite, 'http://') !== 0 && strpos($this->txSite, 'https://') !== 0) {
+                $this->txSite = 'http://' . $this->txSite;
+            }
+            if (!parse_url($this->txSite, PHP_URL_HOST)) {
+                throw new RuntimeException('SITE environment variable is not a valid url');
+            }
         }
         // This will be set to false by default if TX_DEV_MODE environment variable is not defined
         $this->isDevMode = in_array(strtolower(getenv('TX_DEV_MODE')), ['on', 'true', '1']);
