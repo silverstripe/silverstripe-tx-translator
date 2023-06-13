@@ -406,7 +406,7 @@ class Translator
         }
         $module = urlencode(implode(',', $modulesNames));
         $site = rtrim($this->txSite, '/');
-        $this->exec("wget --content-on-error $site/dev/tasks/i18nTextCollectorTask?flush=all&merge=1&module=$module");
+        $this->exec("wget --content-on-error $site/dev/tasks/i18nTextCollectorTask?module=$module");
     }
 
     /**
