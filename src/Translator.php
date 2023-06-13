@@ -69,7 +69,9 @@ class Translator
     private function checkEnv(): void
     {
         $txInstructions = 'Install the new go version of the client https://developers.transifex.com/docs/cli';
-        if ($this->exec('which tx') === '') {
+        try {
+            $this->exec('which tx');
+        } catch (ProcessFailedException $e) {
             throw new RuntimeException("Could not find tx executable. $txInstructions");
         }
         $help = $this->exec('tx help');
@@ -78,7 +80,9 @@ class Translator
         if (($matches[1] ?? 0) < 1.6) {
             throw new RuntimeException("Your version of tx is too old. $txInstructions");
         }
-        if ($this->exec('which wget') === '') {
+        try {
+            $this->exec('which wget');
+        } catch (ProcessFailedException $e) {
             throw new RuntimeException('Could not find wget command. Please install it.');
         }
         $this->txSite = getenv('TX_SITE');
@@ -88,7 +92,7 @@ class Translator
         if (strpos($this->txSite, 'http://') !== 0 && strpos($this->txSite, 'https://') !== 0) {
             $this->txSite = 'http://' . $this->txSite;
         }
-        if (!filter_var($this->txSite, FILTER_VALIDATE_URL)) {
+        if (!parse_url($this->txSite, PHP_URL_HOST)) {
             throw new RuntimeException('SITE environment variable is not a valid url');
         }
         $this->githubToken = getenv('TX_GITHUB_API_TOKEN');
@@ -119,10 +123,20 @@ class Translator
         return array_diff(scanDir($dir), ['.', '..']);
     }
 
+    private function getFrameworkMajor(): string
+    {
+        $output = $this->exec('composer show silverstripe/framework | grep versions');
+        if (!preg_match('#^versions : \* ([4-9])#', $output, $matches)) {
+            throw new LogicException('Could not work out major version of framework');
+        }
+        return $matches[1];
+    }
+
     private function setModulePaths(): void
     {
         $client = new Client();
-        $url = 'https://raw.githubusercontent.com/silverstripe/supported-modules/gh-pages/modules.json';
+        $cmsMajor = $this->getFrameworkMajor();
+        $url = "https://raw.githubusercontent.com/silverstripe/supported-modules/$cmsMajor/modules.json";
         $body = (string) $client->request('GET', $url)->getBody();
         $supportedVendors = [];
         $supportedModules = [];
@@ -143,6 +157,19 @@ class Translator
                 if (!file_exists("$modulePath/.tx/config")) {
                     continue;
                 }
+                // See if the current "branch" is actually a tag that's been checked out,
+                // rather than a minor or next minor branch.
+                // If so, try to git checkout the what the minor branch for the tag should be.
+                // Read all branches rather than just using `git rev-parse --abbrev-ref HEAD` so that
+                // tags aren't just reported as "HEAD", instead they are "(HEAD detached at 3.0.2)"
+                $branches = $this->exec('git branch', $modulePath);
+                // the current branch will be prefixed with a *, extract what the branch is with a regex
+                preg_match("#(^|\n)\* (.+?)(\n|$)#", $branches, $matches);
+                $branch = $matches[2] ?? 'invalid';
+                $cleanBranch = $this->getCleanBranch($branch);
+                if ($cleanBranch !== $branch) {
+                    $this->exec("git checkout $cleanBranch", $modulePath);
+                }
                 $branch = $this->exec('git rev-parse --abbrev-ref HEAD', $modulePath);
                 if (!is_numeric($branch)) {
                     throw new RuntimeException("Branch $branch in $modulePath is not a minor or next-minor branch");
@@ -150,6 +177,17 @@ class Translator
                 $this->modulePaths[] = $modulePath;
             }
         }
+    }
+
+    /**
+     * A tag will show up as "(HEAD detached at 3.0.2)" - return this as 3.0
+     */
+    private function getCleanBranch(string $branch): string
+    {
+        if (preg_match('#^\(HEAD detached at ([0-9]+\.[0-9]+)\.[0-9]+#', $branch, $matches)) {
+            return $matches[1];
+        }
+        return $branch;
     }
 
     /**
@@ -213,6 +251,7 @@ class Translator
     private function transifexPullSource()
     {
         foreach ($this->modulePaths as $modulePath) {
+            $this->log("Pulling translations for $modulePath");
             // ensure .tx/config is up to date
             $contents = file_get_contents("$modulePath/.tx/config");
             if (strpos($contents, '[o:') === false) {
@@ -237,17 +276,71 @@ class Translator
     private function mergeYaml(): void
     {
         $this->log('Merging local yaml files');
+        // $this->originalYaml at this point is yaml prior to adding in transifex yaml
         foreach ($this->originalYaml as $path => $contentYaml) {
             // If there are any keys in the original yaml that are missing now, add them back in.
             if (file_exists($path)) {
                 $rawYaml = file_get_contents($path);
+                // $parsedYaml at this point is transifex yaml
                 $parsedYaml = Yaml::parse($rawYaml);
+                $this->removeBlankStrings($parsedYaml);
+                // transifex yaml has precedence over original yaml
                 $contentYaml = $this->arrayMergeRecursive($contentYaml, $parsedYaml);
             }
             // Write back to local
             file_put_contents($path, Yaml::dump($contentYaml));
         }
         $this->log('Finished merging ' . count($this->originalYaml) . ' yaml files');
+    }
+
+    private $blankEnStrings;
+
+    private function removeBlankStrings(array &$sourceData)
+    {
+        $this->blankEnStrings = [];
+        foreach ($sourceData as $lang => &$data) {
+            if ($lang !== 'en') {
+                continue;
+            }
+            $this->recursiveRecordBlankStrings('', $data);
+        }
+        foreach ($sourceData as $lang => &$data) {
+            if ($lang === 'en') {
+                continue;
+            }
+            if (is_array($data)) {
+                $this->recursiveRemoveBlankStrings('', $data);
+            }
+        }
+    }
+
+    private function recursiveRecordBlankStrings(string $parentKey, array &$data)
+    {
+        foreach ($data as $key => &$val) {
+            if (is_array($val)) {
+                $this->recursiveRecordBlankStrings($parentKey . '-' . $key, $val);
+            }
+            if (is_string($val) && $this->isEmpty($val)) {
+                $this->blankEnStrings[$parentKey . '-' . $key] = true;
+            }
+        }
+    }
+
+    private function recursiveRemoveBlankStrings(string $parentKey, array &$data)
+    {
+        foreach ($data as $key => &$val) {
+            if (is_array($val)) {
+                $this->recursiveRemoveBlankStrings($parentKey . '-' . $key, $val);
+            }
+            if ($this->isEmpty($val) && !array_key_exists($parentKey . '-' . $key, $this->blankEnStrings)) {
+                unset($data[$key]);
+            }
+        }
+    }
+
+    private function isEmpty($val)
+    {
+        return empty($val) && $val !== '0';
     }
 
     /**
@@ -262,6 +355,7 @@ class Translator
             foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $sourceFile) {
                 $dirty = file_get_contents($sourceFile);
                 $sourceData = Yaml::parse($dirty);
+                $this->removeBlankStrings($sourceData);
                 $cleaned = Yaml::dump($sourceData, 9999, 2);
                 if ($dirty !== $cleaned) {
                     $num++;
@@ -302,7 +396,7 @@ class Translator
         }
         $module = urlencode(implode(',', $modulesNames));
         $site = rtrim($this->txSite, '/');
-        $this->exec("wget $site/dev/tasks/i18nTextCollectorTask?flush=all&merge=1&module=$module");
+        $this->exec("wget --content-on-error $site/dev/tasks/i18nTextCollectorTask?flush=all&merge=1&module=$module");
     }
 
     /**
@@ -374,11 +468,16 @@ class Translator
                     'Not pushing changes or creating pull-request because TX_DEV_MODE is enabled.',
                     'A new branch was created.'
                 ]));
-                return;
+                continue;
             }
 
             // Push changes to creative-commoners
             $this->exec("git push --set-upstream tx-ccs $branch", $modulePath);
+
+            // Ensure secondary-rate limit is not exceeded
+            $seconds = 10;
+            $this->log("Sleeping $seconds seconds so that secondary rate-limit is not exceeded");
+            sleep($seconds);
 
             // Create pull-request via github api
             // https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request
@@ -416,7 +515,7 @@ class Translator
     {
         $this->log('<info>The following pull-requests were created:</info>');
         foreach ($this->pullRequestUrls as $pullRequestUrl) {
-            $this->log($pullRequestUrl);
+            $this->log("- $pullRequestUrl");
         }
     }
 
@@ -429,6 +528,8 @@ class Translator
     {
         $this->log("Running $command");
         $process = Process::fromShellCommandline($command, $cwd);
+        // set a timeout of 5 minutes - tx pull operations may take a long time
+        $process->setTimeout(300);
         $process->run();
         if (!$process->isSuccessful()) {
             throw new ProcessFailedException($process);
