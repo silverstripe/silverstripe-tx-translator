@@ -296,6 +296,7 @@ class Translator
                 $this->removeBlankStrings($parsedYaml);
                 // transifex yaml has precedence over original yaml
                 $contentYaml = $this->arrayMergeRecursive($contentYaml, $parsedYaml);
+                $this->recursiveKeySort($contentYaml);
             }
             // Write back to local
             file_put_contents($path, Yaml::dump($contentYaml));
@@ -366,6 +367,7 @@ class Translator
                 $dirty = file_get_contents($sourceFile);
                 $sourceData = Yaml::parse($dirty);
                 $this->removeBlankStrings($sourceData);
+                $this->recursiveKeySort($sourceData);
                 $cleaned = Yaml::dump($sourceData, 9999, 2);
                 if ($dirty !== $cleaned) {
                     $num++;
@@ -387,6 +389,7 @@ class Translator
             if (file_exists($path)) {
                 $parsedJson = $this->jsonDecode(file_get_contents($path));
                 $contentJson = array_merge($contentJson, $parsedJson);
+                $this->recursiveKeySort($contentJson);
             }
             // Write back to local
             file_put_contents($path, $this->jsonEncode($contentJson));
@@ -628,7 +631,9 @@ class Translator
         $count = 0;
         foreach (glob("{$jsPath}/src/*.js*") as $sourceFile) {
             // re-encode contents to ensure they're consistently formatted
-            $sourceContents = $this->jsonEncode($this->jsonDecode(file_get_contents($sourceFile)));
+            $sourceContentsDecoded = $this->jsonDecode(file_get_contents($sourceFile));
+            $this->recursiveKeySort($sourceContentsDecoded);
+            $sourceContentsEncoded = $this->jsonEncode($sourceContentsDecoded);
             $locale = preg_replace('/\.js.*$/', '', basename($sourceFile));
             $targetFile = dirname(dirname($sourceFile)) . '/' . $locale . '.js';
             $this->log("Generating file {$targetFile}", true);
@@ -641,7 +646,7 @@ class Translator
                 console.error('Class ss.i18n not defined');  // eslint-disable-line no-console
               }
             } else {
-              ss.i18n.addDictionary('$locale', $sourceContents);
+              ss.i18n.addDictionary('$locale', $sourceContentsEncoded);
             }
             EOT;
             file_put_contents($targetFile, $targetContents);
@@ -686,5 +691,15 @@ class Translator
             }
         }
         return $array1;
+    }
+
+    private function recursiveKeySort(array &$arr): void
+    {
+        ksort($arr);
+        foreach (array_keys($arr) as $key) {
+            if (is_array($arr[$key])) {
+                $this->recursiveKeySort($arr[$key]);
+            }
+        }
     }
 }
