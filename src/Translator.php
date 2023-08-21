@@ -563,7 +563,7 @@ class Translator
     /**
      * Gets the module lang dir
      */
-    private function getYmlLangDirectory(string $modulePath): string
+    private function getYmlLangDirectory(string $modulePath): ?string
     {
         $sources = $this->getTransifexSources($modulePath);
         foreach ($sources as $source) {
@@ -599,7 +599,7 @@ class Translator
         $content = file_get_contents($path);
         $sources = [];
         foreach (preg_split('#\R#u', $content) as $line) {
-            if (preg_match('#source_file\s=\s(?<path>\S+)#', $line, $matches)) {
+            if (preg_match('#source_file\s+=\s+(?<path>\S+)#', $line, $matches)) {
                 $sources[] = $matches['path'];
             }
         }
