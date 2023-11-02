@@ -460,7 +460,7 @@ class Translator
             $this->exec("git checkout -b $branch", $modulePath);
 
             // Commit changes
-            $title = 'ENH Update translations';
+            $title = 'TLN Update translations';
             $this->exec("git commit -m \"$title\"", $modulePath);
 
             if ($this->isDevMode) {
