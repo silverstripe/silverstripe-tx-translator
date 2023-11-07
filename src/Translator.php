@@ -56,8 +56,10 @@ class Translator
             $this->setJsonAndYmlFileTimes();
             $this->transifexPullSource();
             $this->mergeYaml();
+            $this->removeEnglishStringsFromYamlTranslations();
             $this->cleanYaml();
             $this->mergeJson();
+            $this->removeEnglishStringsFromJsonTranslations();
         }
         if ($this->doCollectStrings) {
             $this->collectStrings();
@@ -296,11 +298,61 @@ class Translator
                 $this->removeBlankStrings($parsedYaml);
                 // transifex yaml has precedence over original yaml
                 $contentYaml = $this->arrayMergeRecursive($contentYaml, $parsedYaml);
+                $this->recursiveKeySort($contentYaml);
             }
             // Write back to local
             file_put_contents($path, Yaml::dump($contentYaml));
         }
         $this->log('Finished merging ' . count($this->originalYaml) . ' yaml files');
+    }
+
+    /**
+     * Transifex may add english strings to translation yaml files, remove them
+     */
+    private function removeEnglishStringsFromYamlTranslations(): void
+    {
+        $this->log('Removing english from yml translation files');
+        $enPath = '';
+        $enYaml = null;
+        $count = 0;
+        foreach (array_keys($this->originalYaml) as $path) {
+            if (!file_exists($path)) {
+                continue;
+            }
+            if (!$enPath) {
+                $enPath = preg_replace('#/[^/\.]+\.yml#', '/en.yml', $path);
+            }
+            if (!$enYaml) {
+                $enYaml = Yaml::parse(file_get_contents($enPath));
+            }
+            if ($enPath === $path) {
+                continue;
+            }
+            // Remove any keys where the value is the same as the source english value
+            $contentYaml = Yaml::parse(file_get_contents($path));
+            foreach (array_keys($contentYaml) as $countryCode) {
+                foreach (array_keys($contentYaml[$countryCode] ?? []) as $className) {
+                    foreach (array_keys($contentYaml[$countryCode][$className]) as $key) {
+                        $value = $contentYaml[$countryCode][$className][$key] ?? null;
+                        $enValue = $enYaml['en'][$className][$key] ?? null;
+                        if ($value === $enValue) {
+                            unset($contentYaml[$countryCode][$className][$key]);
+                            $count++;
+                        }
+                        // Remove any className nodes that have had all their keys removed
+                        if (
+                            isset($contentYaml[$countryCode][$className])
+                            && empty($contentYaml[$countryCode][$className])
+                        ) {
+                            unset($contentYaml[$countryCode][$className]);
+                        }
+                    }
+                }
+            }
+            // Write back to local
+            file_put_contents($path, Yaml::dump($contentYaml));
+        }
+        $this->log("Removed $count english string(s) from yml translation files");
     }
 
     private $blankEnStrings;
@@ -366,6 +418,7 @@ class Translator
                 $dirty = file_get_contents($sourceFile);
                 $sourceData = Yaml::parse($dirty);
                 $this->removeBlankStrings($sourceData);
+                $this->recursiveKeySort($sourceData);
                 $cleaned = Yaml::dump($sourceData, 9999, 2);
                 if ($dirty !== $cleaned) {
                     $num++;
@@ -387,11 +440,48 @@ class Translator
             if (file_exists($path)) {
                 $parsedJson = $this->jsonDecode(file_get_contents($path));
                 $contentJson = array_merge($contentJson, $parsedJson);
+                $this->recursiveKeySort($contentJson);
             }
             // Write back to local
             file_put_contents($path, $this->jsonEncode($contentJson));
         }
         $this->log('Finished merging ' . count($this->originalJson) . ' json files');
+    }
+
+    /**
+     * Transifex may add english strings to translation json files, remove them
+     */
+    private function removeEnglishStringsFromJsonTranslations(): void
+    {
+        $this->log('Removing english from json translation files');
+        $enPath = '';
+        $enJson = null;
+        $count = 0;
+        foreach (array_keys($this->originalJson) as $path) {
+            if (!file_exists($path)) {
+                continue;
+            }
+            if (!$enPath) {
+                $enPath = preg_replace('#/[^/\.]+\.json$#', '/en.json', $path);
+            }
+            if (!$enJson) {
+                $enJson = $this->jsonDecode(file_get_contents($enPath));
+            }
+            if ($enPath === $path) {
+                continue;
+            }
+            // Remove any keys where the value is the same as the source english value
+            $contentJson = $this->jsonDecode(file_get_contents($path));
+            foreach (array_keys($contentJson) as $key) {
+                if (array_key_exists($key, $enJson) && $enJson[$key] === $contentJson[$key]) {
+                    unset($contentJson[$key]);
+                    $count++;
+                }
+            }
+            // Write back to local
+            file_put_contents($path, $this->jsonEncode($contentJson));
+        }
+        $this->log("Removed $count english string(s) from json translation files");
     }
 
     /**
@@ -406,7 +496,7 @@ class Translator
         }
         $module = urlencode(implode(',', $modulesNames));
         $site = rtrim($this->txSite, '/');
-        $this->exec("wget --content-on-error $site/dev/tasks/i18nTextCollectorTask?flush=all&merge=1&module=$module");
+        $this->exec("wget --content-on-error $site/dev/tasks/i18nTextCollectorTask?module=$module");
     }
 
     /**
@@ -470,7 +560,7 @@ class Translator
             $this->exec("git checkout -b $branch", $modulePath);
 
             // Commit changes
-            $title = 'ENH Update translations';
+            $title = 'TLN Update translations';
             $this->exec("git commit -m \"$title\"", $modulePath);
 
             if ($this->isDevMode) {
@@ -560,7 +650,7 @@ class Translator
     /**
      * Gets the module lang dir
      */
-    private function getYmlLangDirectory(string $modulePath): string
+    private function getYmlLangDirectory(string $modulePath): ?string
     {
         $sources = $this->getTransifexSources($modulePath);
         foreach ($sources as $source) {
@@ -596,7 +686,7 @@ class Translator
         $content = file_get_contents($path);
         $sources = [];
         foreach (preg_split('#\R#u', $content) as $line) {
-            if (preg_match('#source_file\s=\s(?<path>\S+)#', $line, $matches)) {
+            if (preg_match('#source_file\s+=\s+(?<path>\S+)#', $line, $matches)) {
                 $sources[] = $matches['path'];
             }
         }
@@ -628,7 +718,9 @@ class Translator
         $count = 0;
         foreach (glob("{$jsPath}/src/*.js*") as $sourceFile) {
             // re-encode contents to ensure they're consistently formatted
-            $sourceContents = $this->jsonEncode($this->jsonDecode(file_get_contents($sourceFile)));
+            $sourceContentsDecoded = $this->jsonDecode(file_get_contents($sourceFile));
+            $this->recursiveKeySort($sourceContentsDecoded);
+            $sourceContentsEncoded = $this->jsonEncode($sourceContentsDecoded);
             $locale = preg_replace('/\.js.*$/', '', basename($sourceFile));
             $targetFile = dirname(dirname($sourceFile)) . '/' . $locale . '.js';
             $this->log("Generating file {$targetFile}", true);
@@ -641,7 +733,7 @@ class Translator
                 console.error('Class ss.i18n not defined');  // eslint-disable-line no-console
               }
             } else {
-              ss.i18n.addDictionary('$locale', $sourceContents);
+              ss.i18n.addDictionary('$locale', $sourceContentsEncoded);
             }
             EOT;
             file_put_contents($targetFile, $targetContents);
@@ -686,5 +778,15 @@ class Translator
             }
         }
         return $array1;
+    }
+
+    private function recursiveKeySort(array &$arr): void
+    {
+        ksort($arr);
+        foreach (array_keys($arr) as $key) {
+            if (is_array($arr[$key])) {
+                $this->recursiveKeySort($arr[$key]);
+            }
+        }
     }
 }
