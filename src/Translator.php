@@ -9,6 +9,7 @@ use Symfony\Component\Yaml\Yaml;
 use RuntimeException;
 use LogicException;
 use Symfony\Component\Console\Formatter\OutputFormatter;
+use Exception;
 
 class Translator
 {
@@ -32,8 +33,6 @@ class Translator
 
     private string $githubToken = '';
 
-    private array $modulePaths = [];
-
     private array $originalJson = [];
 
     private array $originalYaml = [];
@@ -48,30 +47,37 @@ class Translator
     {
         $this->outputFormatter = new OutputFormatter(true);
         $this->checkEnv();
-        $this->setModulePaths();
-        if ($this->doTransifexPullAndUpdate) {
-            $this->log('Updating translations for ' . count($this->modulePaths) . ' module(s)');
-            $this->storeJson();
-            $this->storeYaml();
-            $this->setJsonAndYmlFileTimes();
-            $this->transifexPullSource();
-            $this->mergeYaml();
-            $this->removeEnglishStringsFromYamlTranslations();
-            $this->cleanYaml();
-            $this->mergeJson();
-            $this->removeEnglishStringsFromJsonTranslations();
+        $modulePaths = $this->getModulePaths();
+        $this->log('Updating translations for ' . count($modulePaths) . ' module(s)');
+        try {
+            foreach ($modulePaths as $modulePath) {
+                if ($this->doTransifexPullAndUpdate) {
+                    $this->storeJson($modulePath);
+                    $this->storeYaml($modulePath);
+                    $this->setJsonAndYmlFileTimes($modulePath);
+                    $this->transifexPullSource($modulePath);
+                    $this->mergeYaml();
+                    $this->removeEnglishStringsFromYamlTranslations();
+                    $this->cleanYaml($modulePath);
+                    $this->mergeJson();
+                    $this->removeEnglishStringsFromJsonTranslations();
+                }
+                if ($this->doCollectStrings) {
+                    $this->collectStrings($modulePath);
+                }
+                if ($this->doTransifexPullAndUpdate) {
+                    $this->generateJavascript($modulePath);
+                }
+                if ($this->doTransifexPush) {
+                    $this->transifexPushSource($modulePath);
+                }
+                $this->gitCommitPushAndPullRequest($modulePath);
+            }
+        } catch (Exception $e) {
+            throw $e;
+        } finally {
+            $this->outputPullRequestUrls();
         }
-        if ($this->doCollectStrings) {
-            $this->collectStrings();
-        }
-        if ($this->doTransifexPullAndUpdate) {
-            $this->generateJavascript();
-        }
-        if ($this->doTransifexPush) {
-            $this->transifexPushSource();
-        }
-        $this->gitCommitPushAndPullRequest();
-        $this->outputPullRequestUrls();
     }
 
     private function checkEnv(): void
@@ -144,8 +150,9 @@ class Translator
         return $matches[1];
     }
 
-    private function setModulePaths(): void
+    private function getModulePaths(): array
     {
+        $modulePaths = [];
         $client = new Client();
         $cmsMajor = $this->getFrameworkMajor();
         $url = "https://raw.githubusercontent.com/silverstripe/supported-modules/$cmsMajor/modules.json";
@@ -186,9 +193,10 @@ class Translator
                 if (!is_numeric($branch)) {
                     throw new RuntimeException("Branch $branch in $modulePath is not a minor or next-minor branch");
                 }
-                $this->modulePaths[] = $modulePath;
+                $modulePaths[] = $modulePath;
             }
         }
+        return $modulePaths;
     }
 
     /**
@@ -205,18 +213,16 @@ class Translator
     /**
      * Backup local json files prior to replacing local copies with transifex
      */
-    private function storeJson(): void
+    private function storeJson(string $modulePath): void
     {
         $this->log('Backing up local json files');
         // Backup files prior to replacing local copies with transifex
         $this->originalJson = [];
-        foreach ($this->modulePaths as $modulePath) {
-            $jsPath = $this->getJSLangDirectories($modulePath);
-            foreach ((array) $jsPath as $langDir) {
-                foreach (glob($langDir . '/src/*.json') as $path) {
-                    $str = file_get_contents($path);
-                    $this->originalJson[$path] = $this->jsonDecode($str);
-                }
+        $jsPath = $this->getJSLangDirectories($modulePath);
+        foreach ((array) $jsPath as $langDir) {
+            foreach (glob($langDir . '/src/*.json') as $path) {
+                $str = file_get_contents($path);
+                $this->originalJson[$path] = $this->jsonDecode($str);
             }
         }
         $this->log('Finished backing up ' . count($this->originalJson) . ' json files');
@@ -225,15 +231,13 @@ class Translator
     /**
      * Backup local yaml files in memory prior to replacing local copies with transifex
      */
-    private function storeYaml(): void
+    private function storeYaml(string $modulePath): void
     {
         $this->log('Backing up local yaml files');
         $this->originalYaml = [];
-        foreach ($this->modulePaths as $modulePath) {
-            foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $path) {
-                $rawYaml = file_get_contents($path);
-                $this->originalYaml[$path] = Yaml::parse($rawYaml);
-            }
+        foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $path) {
+            $rawYaml = file_get_contents($path);
+            $this->originalYaml[$path] = Yaml::parse($rawYaml);
         }
         $this->log('Finished backing up ' . count($this->originalYaml) . ' yaml files');
     }
@@ -241,45 +245,41 @@ class Translator
     /**
      * Set mtime to a year ago so that transifex will see these as obsolete
      */
-    private function setJsonAndYmlFileTimes()
+    private function setJsonAndYmlFileTimes(string $modulePath): void
     {
         $date = date('YmdHi.s', strtotime('-1 year'));
-        foreach ($this->modulePaths as $modulePath) {
-            $name = $this->getModuleName($modulePath);
-            $this->log("Setting file mtime to a past date for <info>{$name}</info>");
-            $ymlLang = $this->getYmlLangDirectory($modulePath);
-            if ($ymlLang) {
-                $this->exec("find $ymlLang -type f \( -name \"*.yml\" \) -exec touch -t $date {} \;");
-            }
-            foreach ($this->getJSLangDirectories($modulePath) as $jsLangDir) {
-                $this->exec("find $jsLangDir -type f \( -name \"*.json*\" \) -exec touch -t $date {} \;");
-            }
+        $name = $this->getModuleName($modulePath);
+        $this->log("Setting file mtime to a past date for <info>{$name}</info>");
+        $ymlLang = $this->getYmlLangDirectory($modulePath);
+        if ($ymlLang) {
+            $this->exec("find $ymlLang -type f \( -name \"*.yml\" \) -exec touch -t $date {} \;");
+        }
+        foreach ($this->getJSLangDirectories($modulePath) as $jsLangDir) {
+            $this->exec("find $jsLangDir -type f \( -name \"*.json*\" \) -exec touch -t $date {} \;");
         }
     }
 
     /**
      * Update sources from transifex
      */
-    private function transifexPullSource()
+    private function transifexPullSource(string $modulePath): void
     {
-        foreach ($this->modulePaths as $modulePath) {
-            $this->log("Pulling translations for $modulePath");
-            // ensure .tx/config is up to date
-            $contents = file_get_contents("$modulePath/.tx/config");
-            if (strpos($contents, '[o:') === false) {
-                $this->exec('tx migrate', $modulePath);
-                // delete .bak files created as part of tx migrate
-                foreach (scandir("$modulePath/.tx") as $filename) {
-                    if (pathinfo($filename, PATHINFO_EXTENSION) !== 'bak') {
-                        continue;
-                    }
-                    $this->log("Deleting $modulePath/.tx/$filename");
-                    unlink("$modulePath/.tx/$filename");
+        $this->log("Pulling translations for $modulePath");
+        // ensure .tx/config is up to date
+        $contents = file_get_contents("$modulePath/.tx/config");
+        if (strpos($contents, '[o:') === false) {
+            $this->exec('tx migrate', $modulePath);
+            // delete .bak files created as part of tx migrate
+            foreach (scandir("$modulePath/.tx") as $filename) {
+                if (pathinfo($filename, PATHINFO_EXTENSION) !== 'bak') {
+                    continue;
                 }
+                $this->log("Deleting $modulePath/.tx/$filename");
+                unlink("$modulePath/.tx/$filename");
             }
-            // pull from transifex
-            $this->exec("tx pull -a -s -t -f --minimum-perc={$this->txMinimumPerc}", $modulePath);
         }
+        // pull from transifex
+        $this->exec("tx pull -a -s -t -f --minimum-perc={$this->txMinimumPerc}", $modulePath);
     }
 
     /**
@@ -408,25 +408,23 @@ class Translator
     /**
      * Tidy yaml files using symfony yaml
      */
-    private function cleanYaml()
+    private function cleanYaml($modulePath)
     {
-        foreach ($this->modulePaths as $modulePath) {
-            $name = $this->getModuleName($modulePath);
-            $this->log("Cleaning YAML sources for <info>{$name}</info>");
-            $num = 0;
-            foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $sourceFile) {
-                $dirty = file_get_contents($sourceFile);
-                $sourceData = Yaml::parse($dirty);
-                $this->removeBlankStrings($sourceData);
-                $this->recursiveKeySort($sourceData);
-                $cleaned = Yaml::dump($sourceData, 9999, 2);
-                if ($dirty !== $cleaned) {
-                    $num++;
-                    file_put_contents($sourceFile, $cleaned);
-                }
+        $name = $this->getModuleName($modulePath);
+        $this->log("Cleaning YAML sources for <info>{$name}</info>");
+        $num = 0;
+        foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $sourceFile) {
+            $dirty = file_get_contents($sourceFile);
+            $sourceData = Yaml::parse($dirty);
+            $this->removeBlankStrings($sourceData);
+            $this->recursiveKeySort($sourceData);
+            $cleaned = Yaml::dump($sourceData, 9999, 2);
+            if ($dirty !== $cleaned) {
+                $num++;
+                file_put_contents($sourceFile, $cleaned);
             }
-            $this->log("<info>{$num}</info> yml files cleaned");
         }
+        $this->log("<info>{$num}</info> yml files cleaned");
     }
 
     /**
@@ -485,16 +483,12 @@ class Translator
     }
 
     /**
-     * Run text collector on the given modules
+     * Run text collector on the given module
      */
-    private function collectStrings(): void
+    private function collectStrings(string $modulePath): void
     {
         $this->log('Running i18nTextCollectorTask');
-        $modulesNames = [];
-        foreach ($this->modulePaths as $modulePath) {
-            $modulesNames[] = $this->getModuleName($modulePath);
-        }
-        $module = urlencode(implode(',', $modulesNames));
+        $module = urlencode($this->getModuleName($modulePath));
         $site = rtrim($this->txSite, '/');
         $this->exec("wget --content-on-error $site/dev/tasks/i18nTextCollectorTask?module=$module");
     }
@@ -502,112 +496,108 @@ class Translator
     /**
      * Push source updates to transifex
      */
-    private function transifexPushSource(): void
+    private function transifexPushSource(string $modulePath): void
     {
         $this->log('Pushing updated sources to transifex');
         if ($this->isDevMode) {
             $this->log('Not pushing to transifex because TX_DEV_MODE is enabled');
             return;
         }
-        foreach ($this->modulePaths as $modulePath) {
-            $this->exec('tx push -s', $modulePath);
-        }
+        $this->exec('tx push -s', $modulePath);
     }
 
     /**
-     * Commit changes for all modules
+     * Commit changes for the module
      */
-    private function gitCommitPushAndPullRequest(): void
+    private function gitCommitPushAndPullRequest(string $modulePath): void
     {
         $this->log('Committing translations to git');
-        foreach ($this->modulePaths as $modulePath) {
-            $this->log("Committing translations for $modulePath");
-            // Get endpoint
-            $remote = $this->exec('git config --get remote.origin.url', $modulePath);
-            if (!preg_match('#^(https://github\.com/|git@github\.com:)([^/]+)/(.+?)(\.git)?$#', $remote, $matches)) {
-                throw new RuntimeException("Invalid git remote $remote");
+        $this->log("Committing translations for $modulePath");
+        // Get endpoint
+        $remote = $this->exec('git config --get remote.origin.url', $modulePath);
+        if (!preg_match('#^(https://github\.com/|git@github\.com:)([^/]+)/(.+?)(\.git)?$#', $remote, $matches)) {
+            throw new RuntimeException("Invalid git remote $remote");
+        }
+        $account = $matches[2];
+        $repo = $matches[3];
+        $endpoint = "https://api.github.com/repos/$account/$repo/pulls";
+
+        // Add remote
+        if (!in_array('tx-ccs', explode("\n", $this->exec('git remote', $modulePath)))) {
+            $this->exec("git remote add tx-ccs git@github.com:creative-commoners/$repo.git", $modulePath);
+        }
+
+        // Git add all changes
+        $jsPath = $this->getJSLangDirectories($modulePath);
+        $langPath = $this->getYmlLangDirectory($modulePath);
+        foreach (array_merge((array) $jsPath, (array) $langPath) as $path) {
+            if (is_dir($path)) {
+                $this->exec("git add $path/*", $modulePath);
             }
-            $account = $matches[2];
-            $repo = $matches[3];
-            $endpoint = "https://api.github.com/repos/$account/$repo/pulls";
+        }
+        $this->exec("git add .tx/config", $modulePath);
 
-            // Add remote
-            if (!in_array('tx-ccs', explode("\n", $this->exec('git remote', $modulePath)))) {
-                $this->exec("git remote add tx-ccs git@github.com:creative-commoners/$repo.git", $modulePath);
-            }
+        // Check if there's anything to commit
+        $status = $this->exec('git status', $modulePath);
+        if (strpos($status, 'nothing to commit') !== false) {
+            $this->log('Nothing to commit');
+            return;
+        }
 
-            // Git add all changes
-            $jsPath = $this->getJSLangDirectories($modulePath);
-            $langPath = $this->getYmlLangDirectory($modulePath);
-            foreach (array_merge((array) $jsPath, (array) $langPath) as $path) {
-                if (is_dir($path)) {
-                    $this->exec("git add $path/*", $modulePath);
-                }
-            }
-            $this->exec("git add .tx/config", $modulePath);
+        // Create new branch
+        $currentBranch = $this->exec('git rev-parse --abbrev-ref HEAD', $modulePath);
+        $time = time();
+        $branch = "pulls/$currentBranch/tx-$time";
+        $this->exec("git checkout -b $branch", $modulePath);
 
-            // Check if there's anything to commit
-            $status = $this->exec('git status', $modulePath);
-            if (strpos($status, 'nothing to commit') !== false) {
-                $this->log('Nothing to commit, continuing');
-                continue;
-            }
+        // Commit changes
+        $title = 'TLN Update translations';
+        $this->exec("git commit -m \"$title\"", $modulePath);
 
-            // Create new branch
-            $currentBranch = $this->exec('git rev-parse --abbrev-ref HEAD', $modulePath);
-            $time = time();
-            $branch = "pulls/$currentBranch/tx-$time";
-            $this->exec("git checkout -b $branch", $modulePath);
+        if ($this->isDevMode) {
+            $this->log(implode(' ', [
+                'Not pushing changes or creating pull-request because TX_DEV_MODE is enabled.',
+                'A new branch was created.'
+            ]));
+            return;
+        }
 
-            // Commit changes
-            $title = 'TLN Update translations';
-            $this->exec("git commit -m \"$title\"", $modulePath);
+        // Push changes to creative-commoners
+        $this->exec("git push --set-upstream tx-ccs $branch", $modulePath);
 
-            if ($this->isDevMode) {
-                $this->log(implode(' ', [
-                    'Not pushing changes or creating pull-request because TX_DEV_MODE is enabled.',
-                    'A new branch was created.'
-                ]));
-                continue;
-            }
+        // Ensure secondary-rate limit is not exceeded
+        $seconds = 10;
+        $this->log("Sleeping $seconds seconds so that secondary rate-limit is not exceeded");
+        sleep($seconds);
 
-            // Push changes to creative-commoners
-            $this->exec("git push --set-upstream tx-ccs $branch", $modulePath);
-
-            // Ensure secondary-rate limit is not exceeded
-            $seconds = 10;
-            $this->log("Sleeping $seconds seconds so that secondary rate-limit is not exceeded");
-            sleep($seconds);
-
-            // Create pull-request via github api
-            // https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request
-            $body = implode(' ', [
-                'Automated translations update generated using',
-                '[silverstripe/tx-translator](https://github.com/silverstripe/silverstripe-tx-translator)'
-            ]);
-            $client = new Client();
-            $response = $client->request('POST', $endpoint, [
-                'headers' => [
-                    "Accept" => "application/vnd.github.v3+json",
-                    "Authorization" => "token {$this->githubToken}"
-                ],
-                'body' => $this->jsonEncode([
-                    "title" => $title,
-                    "body" => $body,
-                    "head" => "creative-commoners:$branch",
-                    "base" => $currentBranch
-                ])
-            ]);
-            $code = $response->getStatusCode();
-            $responseBody = (string) $response->getBody();
-            if ($code === 201) {
-                $pullRequestUrl = json_decode($responseBody)->html_url;
-                $this->log("Pull request was succesfully created at $pullRequestUrl");
-                $this->pullRequestUrls[] = $pullRequestUrl;
-            } else {
-                $this->log($responseBody);
-                throw new RuntimeException("Pull request failed - status code was $code");
-            }
+        // Create pull-request via github api
+        // https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request
+        $body = implode(' ', [
+            'Automated translations update generated using',
+            '[silverstripe/tx-translator](https://github.com/silverstripe/silverstripe-tx-translator)'
+        ]);
+        $client = new Client();
+        $response = $client->request('POST', $endpoint, [
+            'headers' => [
+                "Accept" => "application/vnd.github.v3+json",
+                "Authorization" => "token {$this->githubToken}"
+            ],
+            'body' => $this->jsonEncode([
+                "title" => $title,
+                "body" => $body,
+                "head" => "creative-commoners:$branch",
+                "base" => $currentBranch
+            ])
+        ]);
+        $code = $response->getStatusCode();
+        $responseBody = (string) $response->getBody();
+        if ($code === 201) {
+            $pullRequestUrl = json_decode($responseBody)->html_url;
+            $this->log("Pull request was succesfully created at $pullRequestUrl");
+            $this->pullRequestUrls[] = $pullRequestUrl;
+        } else {
+            $this->log($responseBody);
+            throw new RuntimeException("Pull request failed - status code was $code");
         }
     }
 
@@ -694,18 +684,16 @@ class Translator
     }
 
     /**
-     * Generate javascript for all modules
+     * Generate javascript for the module
      */
-    private function generateJavascript(): void
+    private function generateJavascript(string $modulePath): void
     {
         $this->log('Generating javascript locale files');
         // Check which paths in each module require processing
         $count = 0;
-        foreach ($this->modulePaths as $modulePath) {
-            $jsPaths = $this->getJSLangDirectories($modulePath);
-            foreach ((array)$jsPaths as $jsPath) {
-                $count += $this->generateJavascriptInDirectory($modulePath, $jsPath);
-            }
+        $jsPaths = $this->getJSLangDirectories($modulePath);
+        foreach ((array)$jsPaths as $jsPath) {
+            $count += $this->generateJavascriptInDirectory($modulePath, $jsPath);
         }
         $this->log("Finished generating {$count} files");
     }
