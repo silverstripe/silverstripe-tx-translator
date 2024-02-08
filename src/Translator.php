@@ -34,8 +34,10 @@ class Translator
 
     private array $modulePaths = [];
 
+    /** Original json content for ALL modules */
     private array $originalJson = [];
 
+    /** Original yaml content for ALL modules */
     private array $originalYaml = [];
 
     private array $pullRequestUrls = [];
@@ -312,19 +314,13 @@ class Translator
     private function removeEnglishStringsFromYamlTranslations(): void
     {
         $this->log('Removing english from yml translation files');
-        $enPath = '';
-        $enYaml = null;
         $count = 0;
         foreach (array_keys($this->originalYaml) as $path) {
             if (!file_exists($path)) {
                 continue;
             }
-            if (!$enPath) {
-                $enPath = preg_replace('#/[^/\.]+\.yml#', '/en.yml', $path);
-            }
-            if (!$enYaml) {
-                $enYaml = Yaml::parse(file_get_contents($enPath));
-            }
+            $enPath = preg_replace('#/[^/\.]+\.yml#', '/en.yml', $path);
+            $enYaml = Yaml::parse(file_get_contents($enPath));
             if ($enPath === $path) {
                 continue;
             }
@@ -454,19 +450,13 @@ class Translator
     private function removeEnglishStringsFromJsonTranslations(): void
     {
         $this->log('Removing english from json translation files');
-        $enPath = '';
-        $enJson = null;
         $count = 0;
         foreach (array_keys($this->originalJson) as $path) {
             if (!file_exists($path)) {
                 continue;
             }
-            if (!$enPath) {
-                $enPath = preg_replace('#/[^/\.]+\.json$#', '/en.json', $path);
-            }
-            if (!$enJson) {
-                $enJson = $this->jsonDecode(file_get_contents($enPath));
-            }
+            $enPath = preg_replace('#/[^/\.]+\.json$#', '/en.json', $path);
+            $enJson = $this->jsonDecode(file_get_contents($enPath));
             if ($enPath === $path) {
                 continue;
             }
