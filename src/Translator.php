@@ -533,7 +533,7 @@ class Translator
             $langPath = $this->getYmlLangDirectory($modulePath);
             foreach (array_merge((array) $jsPath, (array) $langPath) as $path) {
                 if (is_dir($path)) {
-                    $this->exec("git add $path/*", $modulePath);
+                    $this->exec("git add $path", $modulePath);
                 }
             }
             $this->exec("git add .tx/config", $modulePath);
