@@ -328,7 +328,7 @@ class Translator
             $contentYaml = Yaml::parse(file_get_contents($path));
             foreach (array_keys($contentYaml) as $countryCode) {
                 foreach (array_keys($contentYaml[$countryCode] ?? []) as $className) {
-                    foreach (array_keys($contentYaml[$countryCode][$className]) as $key) {
+                    foreach (array_keys($contentYaml[$countryCode][$className] ?? []) as $key) {
                         $value = $contentYaml[$countryCode][$className][$key] ?? null;
                         $enValue = $enYaml['en'][$className][$key] ?? null;
                         if ($value === $enValue) {
