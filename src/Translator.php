@@ -62,6 +62,8 @@ class Translator
             $this->cleanYaml();
             $this->mergeJson();
             $this->removeEnglishStringsFromJsonTranslations();
+            $this->removeEmptyYamlFiles();
+            $this->removeEmptyJsFiles();
         }
         if ($this->doCollectStrings) {
             $this->collectStrings();
@@ -531,7 +533,7 @@ class Translator
             $langPath = $this->getYmlLangDirectory($modulePath);
             foreach (array_merge((array) $jsPath, (array) $langPath) as $path) {
                 if (is_dir($path)) {
-                    $this->exec("git add $path/*", $modulePath);
+                    $this->exec("git add $path", $modulePath);
                 }
             }
             $this->exec("git add .tx/config", $modulePath);
@@ -729,7 +731,63 @@ class Translator
             file_put_contents($targetFile, $targetContents);
             $count++;
         }
+        // Delete any javascript files which don't have a src file
+        foreach (glob("{$jsPath}/*.js") as $filePath) {
+            $dir = dirname($filePath);
+            $fileName = basename($filePath);
+            $srcFilePath = "$dir/src/$fileName";
+            // no src .js and no src .json
+            if (!file_exists($srcFilePath) && !file_exists($srcFilePath . 'on')) {
+                $this->log("Deleting empty js file: $filePath", true);
+                $success = unlink($filePath);
+                if (!$success) {
+                    throw new RuntimeException("Couldn't delete empty yaml file: $filePath");
+                }
+            }
+        }
         return $count;
+    }
+
+    private function removeEmptyYamlFiles(): void
+    {
+        foreach ($this->modulePaths as $modulePath) {
+            foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $filePath) {
+                $rawYaml = file_get_contents($filePath);
+                $parsed = Yaml::parse($rawYaml);
+                $isEmpty = true;
+                foreach (array_keys($parsed) as $countryCode) {
+                    if (!empty($parsed[$countryCode])) {
+                        $isEmpty = false;
+                    }
+                }
+                if ($isEmpty) {
+                    $this->log("Deleting empty yaml file: $filePath", true);
+                    $success = unlink($filePath);
+                    if (!$success) {
+                        throw new RuntimeException("Couldn't delete empty yaml file: $filePath");
+                    }
+                }
+            }
+        }
+    }
+
+    private function removeEmptyJsFiles(): void
+    {
+        foreach ($this->modulePaths as $modulePath) {
+            $jsPaths = $this->getJSLangDirectories($modulePath);
+            foreach ((array)$jsPaths as $jsPath) {
+                foreach (glob("{$jsPath}/src/*.js*") as $filePath) {
+                    $sourceContentsDecoded = $this->jsonDecode(file_get_contents($filePath));
+                    if (empty($sourceContentsDecoded)) {
+                        $this->log("Deleting empty js src file: $filePath", true);
+                        $success = unlink($filePath);
+                        if (!$success) {
+                            throw new RuntimeException("Couldn't delete empty json file: $filePath");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private function jsonEncode(array $data): string
