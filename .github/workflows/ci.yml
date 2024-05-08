@@ -4,30 +4,8 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-  # Every Tuesday at 2:00pm UTC
-  schedule:
-    - cron: '0 14 * * 2'
 
 jobs:
-  build:
+  ci:
     name: CI
-    runs-on: ubuntu-latest
-    steps:
-
-    - name: Checkout code
-      uses: actions/checkout@7884fcad6b5d53d10323aee724dc68d8b9096a2e # v2.4.2
-
-    - name: Install PHP
-      uses: shivammathur/setup-php@3eda58347216592f618bb1dff277810b6698e4ca # v2.19.1
-      with:
-        php-version: 7.4
-        tools: composer:v2
-
-    - name: Composer install
-      run: composer install
-
-    - name: PHPUnit
-      run: vendor/bin/phpunit
-
-    - name: PHP linting
-      run: vendor/bin/phpcs
+    uses: silverstripe/gha-ci/.github/workflows/ci.yml@v1
