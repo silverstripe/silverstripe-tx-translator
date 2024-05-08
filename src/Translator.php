@@ -34,8 +34,10 @@ class Translator
 
     private array $modulePaths = [];
 
+    /** Original json content for ALL modules */
     private array $originalJson = [];
 
+    /** Original yaml content for ALL modules */
     private array $originalYaml = [];
 
     private array $pullRequestUrls = [];
@@ -60,6 +62,8 @@ class Translator
             $this->cleanYaml();
             $this->mergeJson();
             $this->removeEnglishStringsFromJsonTranslations();
+            $this->removeEmptyYamlFiles();
+            $this->removeEmptyJsFiles();
         }
         if ($this->doCollectStrings) {
             $this->collectStrings();
@@ -312,19 +316,13 @@ class Translator
     private function removeEnglishStringsFromYamlTranslations(): void
     {
         $this->log('Removing english from yml translation files');
-        $enPath = '';
-        $enYaml = null;
         $count = 0;
         foreach (array_keys($this->originalYaml) as $path) {
             if (!file_exists($path)) {
                 continue;
             }
-            if (!$enPath) {
-                $enPath = preg_replace('#/[^/\.]+\.yml#', '/en.yml', $path);
-            }
-            if (!$enYaml) {
-                $enYaml = Yaml::parse(file_get_contents($enPath));
-            }
+            $enPath = preg_replace('#/[^/\.]+\.yml#', '/en.yml', $path);
+            $enYaml = Yaml::parse(file_get_contents($enPath));
             if ($enPath === $path) {
                 continue;
             }
@@ -332,7 +330,7 @@ class Translator
             $contentYaml = Yaml::parse(file_get_contents($path));
             foreach (array_keys($contentYaml) as $countryCode) {
                 foreach (array_keys($contentYaml[$countryCode] ?? []) as $className) {
-                    foreach (array_keys($contentYaml[$countryCode][$className]) as $key) {
+                    foreach (array_keys($contentYaml[$countryCode][$className] ?? []) as $key) {
                         $value = $contentYaml[$countryCode][$className][$key] ?? null;
                         $enValue = $enYaml['en'][$className][$key] ?? null;
                         if ($value === $enValue) {
@@ -454,19 +452,13 @@ class Translator
     private function removeEnglishStringsFromJsonTranslations(): void
     {
         $this->log('Removing english from json translation files');
-        $enPath = '';
-        $enJson = null;
         $count = 0;
         foreach (array_keys($this->originalJson) as $path) {
             if (!file_exists($path)) {
                 continue;
             }
-            if (!$enPath) {
-                $enPath = preg_replace('#/[^/\.]+\.json$#', '/en.json', $path);
-            }
-            if (!$enJson) {
-                $enJson = $this->jsonDecode(file_get_contents($enPath));
-            }
+            $enPath = preg_replace('#/[^/\.]+\.json$#', '/en.json', $path);
+            $enJson = $this->jsonDecode(file_get_contents($enPath));
             if ($enPath === $path) {
                 continue;
             }
@@ -541,7 +533,7 @@ class Translator
             $langPath = $this->getYmlLangDirectory($modulePath);
             foreach (array_merge((array) $jsPath, (array) $langPath) as $path) {
                 if (is_dir($path)) {
-                    $this->exec("git add $path/*", $modulePath);
+                    $this->exec("git add $path", $modulePath);
                 }
             }
             $this->exec("git add .tx/config", $modulePath);
@@ -739,7 +731,63 @@ class Translator
             file_put_contents($targetFile, $targetContents);
             $count++;
         }
+        // Delete any javascript files which don't have a src file
+        foreach (glob("{$jsPath}/*.js") as $filePath) {
+            $dir = dirname($filePath);
+            $fileName = basename($filePath);
+            $srcFilePath = "$dir/src/$fileName";
+            // no src .js and no src .json
+            if (!file_exists($srcFilePath) && !file_exists($srcFilePath . 'on')) {
+                $this->log("Deleting empty js file: $filePath", true);
+                $success = unlink($filePath);
+                if (!$success) {
+                    throw new RuntimeException("Couldn't delete empty yaml file: $filePath");
+                }
+            }
+        }
         return $count;
+    }
+
+    private function removeEmptyYamlFiles(): void
+    {
+        foreach ($this->modulePaths as $modulePath) {
+            foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $filePath) {
+                $rawYaml = file_get_contents($filePath);
+                $parsed = Yaml::parse($rawYaml);
+                $isEmpty = true;
+                foreach (array_keys($parsed) as $countryCode) {
+                    if (!empty($parsed[$countryCode])) {
+                        $isEmpty = false;
+                    }
+                }
+                if ($isEmpty) {
+                    $this->log("Deleting empty yaml file: $filePath", true);
+                    $success = unlink($filePath);
+                    if (!$success) {
+                        throw new RuntimeException("Couldn't delete empty yaml file: $filePath");
+                    }
+                }
+            }
+        }
+    }
+
+    private function removeEmptyJsFiles(): void
+    {
+        foreach ($this->modulePaths as $modulePath) {
+            $jsPaths = $this->getJSLangDirectories($modulePath);
+            foreach ((array)$jsPaths as $jsPath) {
+                foreach (glob("{$jsPath}/src/*.js*") as $filePath) {
+                    $sourceContentsDecoded = $this->jsonDecode(file_get_contents($filePath));
+                    if (empty($sourceContentsDecoded)) {
+                        $this->log("Deleting empty js src file: $filePath", true);
+                        $success = unlink($filePath);
+                        if (!$success) {
+                            throw new RuntimeException("Couldn't delete empty json file: $filePath");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private function jsonEncode(array $data): string
