@@ -9,6 +9,7 @@ use Symfony\Component\Yaml\Yaml;
 use RuntimeException;
 use LogicException;
 use Symfony\Component\Console\Formatter\OutputFormatter;
+use SilverStripe\SupportedModules\MetaData;
 
 class Translator
 {
@@ -150,15 +151,16 @@ class Translator
 
     private function setModulePaths(): void
     {
-        $client = new Client();
         $cmsMajor = $this->getFrameworkMajor();
-        $url = "https://raw.githubusercontent.com/silverstripe/supported-modules/$cmsMajor/modules.json";
-        $body = (string) $client->request('GET', $url)->getBody();
+        $modules = MetaData::removeReposNotInCmsMajor(
+            MetaData::getAllRepositoryMetaData()[MetaData::CATEGORY_SUPPORTED],
+            $cmsMajor
+        );
         $supportedVendors = [];
         $supportedModules = [];
-        foreach ($this->jsonDecode($body) as $data) {
-            $supportedModules[] = $data['composer'];
-            $supportedVendors[] = explode('/', $data['composer'])[0];
+        foreach ($modules as $module) {
+            $supportedModules[] = $module['packagist'];
+            $supportedVendors[] = explode('/', $module['packagist'])[0];
         }
         $vendorDir = dirname(dirname(dirname(__DIR__)));
         foreach ($this->scandir($vendorDir) as $vendor) {
