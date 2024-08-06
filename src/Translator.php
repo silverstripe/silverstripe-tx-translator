@@ -319,38 +319,37 @@ class Translator
     {
         $this->log('Removing english from yml translation files');
         $count = 0;
-        foreach (array_keys($this->originalYaml) as $path) {
-            if (!file_exists($path)) {
-                continue;
-            }
-            $enPath = preg_replace('#/[^/\.]+\.yml#', '/en.yml', $path);
-            $enYaml = Yaml::parse(file_get_contents($enPath));
-            if ($enPath === $path) {
-                continue;
-            }
-            // Remove any keys where the value is the same as the source english value
-            $contentYaml = Yaml::parse(file_get_contents($path));
-            foreach (array_keys($contentYaml) as $countryCode) {
-                foreach (array_keys($contentYaml[$countryCode] ?? []) as $className) {
-                    foreach (array_keys($contentYaml[$countryCode][$className] ?? []) as $key) {
-                        $value = $contentYaml[$countryCode][$className][$key] ?? null;
-                        $enValue = $enYaml['en'][$className][$key] ?? null;
-                        if ($value === $enValue) {
-                            unset($contentYaml[$countryCode][$className][$key]);
-                            $count++;
-                        }
-                        // Remove any className nodes that have had all their keys removed
-                        if (
-                            isset($contentYaml[$countryCode][$className])
-                            && empty($contentYaml[$countryCode][$className])
-                        ) {
-                            unset($contentYaml[$countryCode][$className]);
+        foreach ($this->modulePaths as $modulePath) {
+            foreach (glob($this->getYmlLangDirectory($modulePath) . '/*.yml') as $path) {
+                $enPath = preg_replace('#/[^/\.]+\.yml#', '/en.yml', $path);
+                $enYaml = Yaml::parse(file_get_contents($enPath));
+                if ($enPath === $path) {
+                    continue;
+                }
+                // Remove any keys where the value is the same as the source english value
+                $contentYaml = Yaml::parse(file_get_contents($path));
+                foreach (array_keys($contentYaml) as $countryCode) {
+                    foreach (array_keys($contentYaml[$countryCode] ?? []) as $className) {
+                        foreach (array_keys($contentYaml[$countryCode][$className] ?? []) as $key) {
+                            $value = $contentYaml[$countryCode][$className][$key] ?? null;
+                            $enValue = $enYaml['en'][$className][$key] ?? null;
+                            if ($value === $enValue) {
+                                unset($contentYaml[$countryCode][$className][$key]);
+                                $count++;
+                            }
+                            // Remove any className nodes that have had all their keys removed
+                            if (
+                                isset($contentYaml[$countryCode][$className])
+                                && empty($contentYaml[$countryCode][$className])
+                            ) {
+                                unset($contentYaml[$countryCode][$className]);
+                            }
                         }
                     }
                 }
+                // Write back to local
+                file_put_contents($path, Yaml::dump($contentYaml));
             }
-            // Write back to local
-            file_put_contents($path, Yaml::dump($contentYaml));
         }
         $this->log("Removed $count english string(s) from yml translation files");
     }
@@ -455,25 +454,31 @@ class Translator
     {
         $this->log('Removing english from json translation files');
         $count = 0;
-        foreach (array_keys($this->originalJson) as $path) {
-            if (!file_exists($path)) {
-                continue;
-            }
-            $enPath = preg_replace('#/[^/\.]+\.json$#', '/en.json', $path);
-            $enJson = $this->jsonDecode(file_get_contents($enPath));
-            if ($enPath === $path) {
-                continue;
-            }
-            // Remove any keys where the value is the same as the source english value
-            $contentJson = $this->jsonDecode(file_get_contents($path));
-            foreach (array_keys($contentJson) as $key) {
-                if (array_key_exists($key, $enJson) && $enJson[$key] === $contentJson[$key]) {
-                    unset($contentJson[$key]);
-                    $count++;
+        foreach ($this->modulePaths as $modulePath) {
+            $jsPaths = $this->getJSLangDirectories($modulePath);
+            foreach ((array)$jsPaths as $jsPath) {
+                foreach (glob("{$jsPath}/src/*.js*") as $path) {
+                    $ext = pathinfo($path, PATHINFO_EXTENSION);
+                    $enPath = preg_replace('#/[^/\.]+\.js[a-zA-Z]*$#', '/en.' . $ext, $path);
+                    if (!file_exists($enPath)) {
+                        $enPath = preg_replace('#/[^/\.]+\.js[a-zA-Z]*$#', '/en.json', $path);
+                    }
+                    $enJson = $this->jsonDecode(file_get_contents($enPath));
+                    if ($enPath === $path) {
+                        continue;
+                    }
+                    // Remove any keys where the value is the same as the source english value
+                    $contentJson = $this->jsonDecode(file_get_contents($path));
+                    foreach (array_keys($contentJson) as $key) {
+                        if (array_key_exists($key, $enJson) && $enJson[$key] === $contentJson[$key]) {
+                            unset($contentJson[$key]);
+                            $count++;
+                        }
+                    }
+                    // Write back to local
+                    file_put_contents($path, $this->jsonEncode($contentJson));
                 }
             }
-            // Write back to local
-            file_put_contents($path, $this->jsonEncode($contentJson));
         }
         $this->log("Removed $count english string(s) from json translation files");
     }
