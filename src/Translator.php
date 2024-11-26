@@ -10,6 +10,7 @@ use RuntimeException;
 use LogicException;
 use Symfony\Component\Console\Formatter\OutputFormatter;
 use SilverStripe\SupportedModules\MetaData;
+use Symfony\Component\Filesystem\Path;
 
 class Translator
 {
@@ -47,6 +48,8 @@ class Translator
 
     private ?OutputFormatter $outputFormatter = null;
 
+    private string $txToken = '';
+
     public function run()
     {
         $this->outputFormatter = new OutputFormatter(true);
@@ -81,6 +84,7 @@ class Translator
 
     private function checkEnv(): void
     {
+        $this->readTxToken();
         $txInstructions = 'Install the new go version of the client https://developers.transifex.com/docs/cli';
         try {
             $this->exec('which tx');
@@ -625,7 +629,13 @@ class Translator
 
     private function exec(string $command, ?string $cwd = null): string
     {
-        $this->log("Running $command");
+        if (str_starts_with($command, 'tx ')) {
+            $token = $this->txToken;
+            $command = "TX_TOKEN=$token $command";
+        }
+        $message = "Running $command";
+        $message = preg_replace('/TX_TOKEN=.+? tx/', 'TX_TOKEN=**** tx', $message);
+        $this->log($message);
         $process = Process::fromShellCommandline($command, $cwd);
         // set a timeout of 5 minutes - tx pull operations may take a long time
         $process->setTimeout(300);
@@ -843,5 +853,23 @@ class Translator
                 $this->recursiveKeySort($arr[$key]);
             }
         }
+    }
+
+    /**
+     * The tx binary doesn't appear to correctly read from ~/.transifexrc, even though it will correctly
+     * write to it after prompting for it if it's missing. This is a workaround to read the token and
+     * use it a TX_TOKEN environment variable, which the tx binary will use.
+     */
+    private function readTxToken(): void
+    {
+        $path = Path::canonicalize('~/.transifexrc');
+        if (!file_exists($path)) {
+            throw new RuntimeException("$path does not exist");
+        }
+        $contents = file_get_contents($path);
+        if (!preg_match('/\ntoken *= *(.+)(\n|$)/', $contents, $matches)) {
+            throw new RuntimeException("Could not get a valid token from $path");
+        }
+        $this->txToken = $matches[1];
     }
 }
