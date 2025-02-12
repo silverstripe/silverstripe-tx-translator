@@ -29,13 +29,13 @@ composer require silverstripe/tx-translator
 To pull latest translations from transifex, typically this will be done on the lowest supported branch:
 
 ```
-TX_GITHUB_API_TOKEN=mytoken php vendor/silverstripe/tx-translator/scripts/translate.php
+TX_TOKEN=$(cat ~/.transifexrc | grep token | cut -c 17-) TX_GITHUB_API_TOKEN=mytoken php vendor/silverstripe/tx-translator/scripts/translate.php
 ```
 
 To run text collector and update transifex with the latest source strings, typically this will be done on the latest next-minor branch:
 
 ```
-TX_GITHUB_API_TOKEN=mytoken TX_SITE=my-local-site.test TX_COLLECT=1 TX_PULL=0 TX_PUSH=1 php vendor/silverstripe/tx-translator/scripts/translate.php
+TX_TOKEN=$(cat ~/.transifexrc | grep token | cut -c 17-) TX_GITHUB_API_TOKEN=mytoken TX_SITE=my-local-site.test TX_COLLECT=1 TX_PULL=0 TX_PUSH=1 php vendor/silverstripe/tx-translator/scripts/translate.php
 ```
 
 
@@ -45,6 +45,7 @@ Environment variables can either be set via the command line, like in the exampl
 
 Note that the valid values for the boolean variables are 1, true, on, 0, false and off.
 
+- `TX_TOKEN` (required) - the transifex API token. Generate this at https://app.transifex.com/user/settings/api/ and add it to your `~/.transifexrc` by manually running `tx push -s` on a supported repository and entering your token when prompted
 - `TX_GITHUB_API_TOKEN` (required) - the github token with write access to create pull-requests
 - `TX_PULL` (default `1`) - pull latest translations from transifex, run i18nTextCollectorTask and update translation files
 - `TX_PUSH` (default `0`) - push new source strings to transifex

@@ -102,6 +102,15 @@ class Translator
         } catch (ProcessFailedException $e) {
             throw new RuntimeException('Could not find wget command. Please install it.');
         }
+        $txToken = getenv('TX_TOKEN');
+        if (!$txToken) {
+            $message = implode(' ', [
+                'Could not get a valid token from TX_TOKEN environment variable.',
+                'Generate this at https://app.transifex.com/user/settings/api/ and add it to `~/.transifexrc` file by' .
+                ' manually running `tx push -s` on a supported repository and entering your token when prompted.'
+            ]);
+            throw new RuntimeException($message);
+        }
         $this->githubToken = getenv('TX_GITHUB_API_TOKEN');
         if (!$this->githubToken) {
             $message = implode(' ', [
