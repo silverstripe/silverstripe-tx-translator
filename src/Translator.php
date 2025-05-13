@@ -673,6 +673,7 @@ class Translator
         if ($isVerbose && !$this->versboseLogging) {
             return;
         }
+        $message = str_replace([$this->txToken, $this->githubToken], '<redacted>', $message);
         echo $this->outputFormatter->format($message) . "\n";
     }
 
