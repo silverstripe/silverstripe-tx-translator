@@ -55,22 +55,19 @@ class Translator
         $this->outputFormatter = new OutputFormatter(true);
         $this->checkEnv();
         $this->setModulePaths();
+        $this->log('Updating translations for ' . count($this->modulePaths) . ' module(s)');
         if ($this->doTransifexPullAndUpdate) {
-            $this->log('Updating translations for ' . count($this->modulePaths) . ' module(s)');
-            $this->storeJson();
-            $this->storeYaml();
+            $this->log('Starting transifex pull block');
+            $this->backupContent();
             $this->setJsonAndYmlFileTimes();
             $this->transifexPullSource();
-            $this->mergeYaml();
-            $this->removeEnglishStringsFromYamlTranslations();
-            $this->cleanYaml();
-            $this->mergeJson();
-            $this->removeEnglishStringsFromJsonTranslations();
-            $this->removeEmptyYamlFiles();
-            $this->removeEmptyJsFiles();
+            $this->mergeAndCleanContent();
         }
         if ($this->doCollectStrings) {
+            $this->log('Starting string collection block');
+            $this->backupContent();
             $this->collectStrings();
+            $this->mergeAndCleanContent();
         }
         if ($this->doTransifexPullAndUpdate) {
             $this->generateJavascript();
@@ -213,12 +210,20 @@ class Translator
     }
 
     /**
-     * Backup local json files prior to replacing local copies with transifex
+     * Backup local JSON and YAML content in memory.
+     */
+    private function backupContent(): void
+    {
+        $this->storeJson();
+        $this->storeYaml();
+    }
+
+    /**
+     * Backup local JSON files in memory
      */
     private function storeJson(): void
     {
         $this->log('Backing up local json files');
-        // Backup files prior to replacing local copies with transifex
         $this->originalJson = [];
         foreach ($this->modulePaths as $modulePath) {
             $jsPath = $this->getJSLangDirectories($modulePath);
@@ -233,7 +238,7 @@ class Translator
     }
 
     /**
-     * Backup local yaml files in memory prior to replacing local copies with transifex
+     * Backup local YAML files in memory
      */
     private function storeYaml(): void
     {
@@ -290,6 +295,21 @@ class Translator
             // pull from transifex
             $this->exec("tx pull -a -s -t -f --minimum-perc={$this->txMinimumPerc}", $modulePath);
         }
+    }
+
+    /**
+     * Merge pulled or discovered localisations into the backups to prevent data loss.
+     * Also cleans up files.
+     */
+    private function mergeAndCleanContent(): void
+    {
+        $this->mergeYaml();
+        $this->removeEnglishStringsFromYamlTranslations();
+        $this->cleanYaml();
+        $this->mergeJson();
+        $this->removeEnglishStringsFromJsonTranslations();
+        $this->removeEmptyYamlFiles();
+        $this->removeEmptyJsFiles();
     }
 
     /**
@@ -653,6 +673,7 @@ class Translator
         if ($isVerbose && !$this->versboseLogging) {
             return;
         }
+        $message = str_replace([$this->txToken, $this->githubToken], '<redacted>', $message);
         echo $this->outputFormatter->format($message) . "\n";
     }
 

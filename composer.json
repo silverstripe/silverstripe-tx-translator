@@ -14,11 +14,11 @@
     "require": {
         "php": "^8.1",
         "silverstripe/supported-modules": "^1",
-        "symfony/console": "^4 || ^5 || ^6",
-        "symfony/process": "^4 || ^5 || ^6",
-        "symfony/yaml": "^4 || ^5 || ^6",
-        "symfony/dotenv": "^5 || ^6",
-        "symfony/filesystem": "^5 || ^6",
+        "symfony/console": "^4 || ^5 || ^6 || ^7",
+        "symfony/process": "^4 || ^5 || ^6 || ^7",
+        "symfony/yaml": "^4 || ^5 || ^6 || ^7",
+        "symfony/dotenv": "^5 || ^6 || ^7",
+        "symfony/filesystem": "^5 || ^6 || ^7",
         "guzzlehttp/guzzle": "^6 || ^7"
     },
     "conflict": {
